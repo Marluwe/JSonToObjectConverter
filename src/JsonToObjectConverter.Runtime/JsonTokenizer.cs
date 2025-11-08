@@ -6,7 +6,11 @@ namespace JsonToObjectConverter.Runtime
 {
     /// <summary>
     /// Tokenizes JSON input into a sequence of tokens.
-    /// Supports standard JSON syntax.
+    /// Supports standard JSON syntax plus extended features:
+    /// - Single-line comments (//)
+    /// - Multi-line comments (/* */)
+    /// - Unquoted property names (identifiers)
+    /// - Multi-line string literals (strings can contain actual newlines)
     /// </summary>
     public class JsonTokenizer
     {
@@ -109,13 +113,10 @@ namespace JsonToObjectConverter.Runtime
                     return ReadString(tokenLine, tokenColumn);
 
                 case 't':
-                    return ReadLiteral("true", JsonTokenType.True, tokenLine, tokenColumn);
-
                 case 'f':
-                    return ReadLiteral("false", JsonTokenType.False, tokenLine, tokenColumn);
-
                 case 'n':
-                    return ReadLiteral("null", JsonTokenType.Null, tokenLine, tokenColumn);
+                    // Could be true/false/null or an identifier
+                    return ReadKeywordOrIdentifier(tokenLine, tokenColumn);
 
                 case '-':
                 case '0':
@@ -131,12 +132,115 @@ namespace JsonToObjectConverter.Runtime
                     return ReadNumber(tokenLine, tokenColumn);
 
                 default:
+                    // Check if it's the start of an identifier (unquoted key)
+                    if (IsIdentifierStart(ch))
+                    {
+                        return ReadIdentifier(tokenLine, tokenColumn);
+                    }
+
                     throw new JsonParseException(
                         $"Unexpected character '{ch}'",
                         tokenLine,
                         tokenColumn,
                         GetContext());
             }
+        }
+
+        private JsonToken ReadKeywordOrIdentifier(int startLine, int startColumn)
+        {
+            var start = _position;
+
+            // Try to match keywords
+            if (TryMatchKeyword("true", JsonTokenType.True, out var token))
+            {
+                return token.Value;
+            }
+            if (TryMatchKeyword("false", JsonTokenType.False, out token))
+            {
+                return token.Value;
+            }
+            if (TryMatchKeyword("null", JsonTokenType.Null, out token))
+            {
+                return token.Value;
+            }
+
+            // Not a keyword, read as identifier
+            _position = start; // Reset position
+            _line = startLine;
+            _column = startColumn;
+            return ReadIdentifier(startLine, startColumn);
+        }
+
+        private bool TryMatchKeyword(string keyword, JsonTokenType tokenType, out JsonToken? token)
+        {
+            var start = _position;
+            var startLine = _line;
+            var startColumn = _column;
+
+            // Check if we have enough characters
+            if (_position + keyword.Length > _json.Length)
+            {
+                token = null;
+                return false;
+            }
+
+            // Check if it matches
+            for (var i = 0; i < keyword.Length; i++)
+            {
+                if (_json[_position + i] != keyword[i])
+                {
+                    token = null;
+                    return false;
+                }
+            }
+
+            // Check that it's not followed by an identifier character
+            // (to avoid matching "trueValue" as "true")
+            if (_position + keyword.Length < _json.Length)
+            {
+                var nextCh = _json[_position + keyword.Length];
+                if (IsIdentifierPart(nextCh))
+                {
+                    // It's part of a longer identifier
+                    token = null;
+                    return false;
+                }
+            }
+
+            // It's a valid keyword
+            _position += keyword.Length;
+            _column += keyword.Length;
+
+            token = new JsonToken(tokenType, keyword.AsMemory(), startLine, startColumn);
+            return true;
+        }
+
+        private JsonToken ReadIdentifier(int startLine, int startColumn)
+        {
+            var start = _position;
+
+            // First character must be a letter or underscore
+            if (!IsIdentifierStart(_json[_position]))
+            {
+                throw new JsonParseException(
+                    $"Invalid identifier start character '{_json[_position]}'",
+                    startLine,
+                    startColumn,
+                    GetContext());
+            }
+
+            Advance();
+
+            // Read remaining identifier characters
+            while (_position < _json.Length && IsIdentifierPart(_json[_position]))
+            {
+                Advance();
+            }
+
+            var value = _json.AsMemory(start, _position - start);
+
+            // Return as PropertyName token (unquoted property names)
+            return new JsonToken(JsonTokenType.PropertyName, value, startLine, startColumn);
         }
 
         private JsonToken ReadString(int startLine, int startColumn)
@@ -371,15 +475,91 @@ namespace JsonToObjectConverter.Runtime
             while (_position < _json.Length)
             {
                 var ch = _json[_position];
+
+                // Skip whitespace characters
                 if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n')
                 {
                     Advance();
+                    continue;
                 }
-                else
+
+                // Check for comments
+                if (ch == '/')
                 {
+                    if (_position + 1 < _json.Length)
+                    {
+                        var nextCh = _json[_position + 1];
+
+                        if (nextCh == '/')
+                        {
+                            // Single-line comment
+                            SkipSingleLineComment();
+                            continue;
+                        }
+                        else if (nextCh == '*')
+                        {
+                            // Multi-line comment
+                            SkipMultiLineComment();
+                            continue;
+                        }
+                    }
+                }
+
+                // No more whitespace or comments
+                break;
+            }
+        }
+
+        private void SkipSingleLineComment()
+        {
+            // Skip the "//"
+            Advance();
+            Advance();
+
+            // Skip until end of line or end of input
+            while (_position < _json.Length)
+            {
+                var ch = _json[_position];
+                if (ch == '\n')
+                {
+                    Advance(); // Skip the newline
                     break;
                 }
+                Advance();
             }
+        }
+
+        private void SkipMultiLineComment()
+        {
+            var startLine = _line;
+            var startColumn = _column;
+
+            // Skip the "/*"
+            Advance();
+            Advance();
+
+            // Skip until we find "*/"
+            while (_position < _json.Length)
+            {
+                var ch = _json[_position];
+
+                if (ch == '*' && _position + 1 < _json.Length && _json[_position + 1] == '/')
+                {
+                    // Found the end of the comment
+                    Advance(); // Skip '*'
+                    Advance(); // Skip '/'
+                    return;
+                }
+
+                Advance();
+            }
+
+            // Reached end of input without closing the comment
+            throw new JsonParseException(
+                "Unterminated multi-line comment",
+                startLine,
+                startColumn,
+                GetContext());
         }
 
         private void Advance()
@@ -404,6 +584,19 @@ namespace JsonToObjectConverter.Runtime
         private static bool IsDigit(char ch)
         {
             return ch >= '0' && ch <= '9';
+        }
+
+        private static bool IsIdentifierStart(char ch)
+        {
+            return (ch >= 'a' && ch <= 'z') ||
+                   (ch >= 'A' && ch <= 'Z') ||
+                   ch == '_' ||
+                   ch == '$'; // Allow $ for JavaScript compatibility
+        }
+
+        private static bool IsIdentifierPart(char ch)
+        {
+            return IsIdentifierStart(ch) || IsDigit(ch);
         }
 
         private string GetContext()
