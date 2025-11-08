@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>JsonToObjectConverter.Runtime</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>JsonToObjectConverter Contributors</Authors>
+    <Description>Runtime components for JSON parsing with extended syntax support</Description>
+    <PackageTags>json;parser;tokenizer;performance</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\JsonToObjectConverter.Core\JsonToObjectConverter.Core.csproj" />
+  </ItemGroup>
+
+</Project>
