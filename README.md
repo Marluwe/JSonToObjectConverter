@@ -5,7 +5,9 @@ Ein hochperformantes, dependency-freies NuGet-Package für .NET, das Source Gene
 ## Features
 
 ### Kernfunktionalität
-- **Zero-Dependency**: Keine externen Abhängigkeiten im generierten Code
+- **Zero-Dependency**: Keine externen Abhängigkeiten zur Laufzeit - nur die Runtime-Komponenten (Parser/Tokenizer) werden benötigt
+  - Attribute werden vom Source Generator im Consumer-Code generiert (keine Core-Abhängigkeit!)
+  - Source Generator ist nur zur Compile-Zeit aktiv (keine Runtime-Abhängigkeit)
 - **Source Generator basiert**: Generiert Deserializer zur Compile-Zeit für maximale Performance
 - **Type-Safe**: Vollständig typsicher durch Code-Generierung
 - **Erweiterbar**: Entwickler können generierte Methoden überschreiben (partial classes)
@@ -42,6 +44,33 @@ JsonToObjectConverter/
 
 ```bash
 dotnet add package JsonToObjectConverter
+```
+
+### Dependency-Architektur (Zero-Dependency!)
+
+Das Projekt verwendet eine innovative Architektur, um **echte Zero-Dependency** zu erreichen:
+
+**Zur Compile-Zeit:**
+- Der Source Generator analysiert Ihren Code und findet alle `[JsonSerializable]`-Attribute
+- Der Generator **erzeugt die Attribute selbst** in Ihrem Code (keine Core-Library nötig!)
+- Der Generator erstellt die Deserialize/Serialize-Methoden für Ihre Klassen
+
+**Zur Laufzeit:**
+- **Nur** die Runtime-Komponenten sind erforderlich: `JsonReader`, `JsonTokenizer`, `JsonToken`
+- Keine Abhängigkeit zur Core-Library (Attribute sind bereits generiert!)
+- Keine Abhängigkeit zum Source Generator (nur Compile-Zeit!)
+
+**Beispiel .csproj:**
+```xml
+<ItemGroup>
+  <!-- Runtime-Komponenten - die einzige Laufzeit-Abhängigkeit! -->
+  <ProjectReference Include="JsonToObjectConverter.Runtime" />
+
+  <!-- Source Generator - NUR Compile-Zeit, keine Runtime-Abhängigkeit! -->
+  <ProjectReference Include="JsonToObjectConverter.SourceGenerator"
+                    OutputItemType="Analyzer"
+                    ReferenceOutputAssembly="false" />
+</ItemGroup>
 ```
 
 ### Basis-Verwendung
@@ -156,26 +185,35 @@ var person = Person.Deserialize(json);
 
 ## Architektur
 
-### 1. Core-Bibliothek
-Enthält Attribute und Interfaces:
+### 1. Source Generator (Compile-Zeit)
+Der Source Generator ist das Herzstück und arbeitet zur Compile-Zeit:
+
+**Generiert Attribute in Ihrem Code:**
 - `[JsonSerializable]`: Markiert Klassen für Code-Generierung
 - `[JsonTypeDiscriminator]`: Definiert Property für Typ-Auflösung
 - `[JsonTypeFactory]`: Registriert Factory für polymorphe Typen
 - `[JsonPropertyName]`: Custom Property-Namen im JSON
 - `[JsonIgnore]`: Ignoriert Properties bei (De-)Serialisierung
 
-### 2. Source Generator
-Generiert zur Compile-Zeit:
+**Generiert Code zur Compile-Zeit:**
 - Deserializer-Methoden für jede public Property
 - Serializer-Methoden
 - Partial Methods für Erweiterungspunkte
 - Factory-Registrierung und Type-Resolution
 
-### 3. Runtime
+### 2. Runtime (Laufzeit - einzige Abhängigkeit!)
+Die Runtime-Komponenten sind die **einzige Laufzeit-Abhängigkeit**:
 - JSON-Tokenizer (unterstützt erweiterte Syntax)
 - JSON-Parser (zero-allocation wo möglich)
+- JsonReader (forward-only Reader für generierten Code)
 - Buffer-Management
 - Error-Handling
+
+### 3. Core-Bibliothek (Optional - nur für Entwicklung)
+Die Core-Bibliothek wird **nicht** zur Laufzeit benötigt!
+- Wird nur für die Entwicklung des Source Generators verwendet
+- Consumer-Code benötigt keine Referenz darauf
+- Alle Attribute werden vom Generator im Consumer-Code erzeugt
 
 ## Design-Prinzipien
 
